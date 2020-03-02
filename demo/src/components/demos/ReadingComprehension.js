@@ -7,6 +7,7 @@ import {
   AccordionItemTitle,
   AccordionItemBody,
 } from 'react-accessible-accordion';
+import styled from 'styled-components';
 import Model from '../Model'
 import OutputField from '../OutputField'
 import { API_ROOT } from '../../api-config';
@@ -17,6 +18,7 @@ import SyntaxHighlight from '../highlight/SyntaxHighlight';
 import SaliencyMaps from '../Saliency'
 import InputReductionComponent from '../InputReduction'
 import HotflipComponent from '../Hotflip'
+import { Tooltip, Row } from 'antd';
 import {
   GRAD_INTERPRETER,
   IG_INTERPRETER,
@@ -24,8 +26,6 @@ import {
   INPUT_REDUCTION_ATTACKER,
   HOTFLIP_ATTACKER
 } from '../InterpretConstants'
-import NestedHighlight, { withHighlightClickHandling, getHighlightColor } from '../highlight/NestedHighlight';
-import { getHighlightConditionalClasses } from '../highlight/Highlight';
 
 const title = "Reading Comprehension"
 
@@ -107,134 +107,6 @@ const NoAnswer = () => {
     </OutputField>
   )
 }
-
-
-
-const NmnDrop = props => {
-  const { 
-    activeIds,
-    activeDepths,
-    isClicking,
-    selectedId,
-    onMouseDown,
-    onMouseOut,
-    onMouseOver,
-    onMouseUp,
-
-    programLisp,
-    questionTokens,
-    passageTokens,
-    /**
-     * For example:
-     * {
-     *   "predicate": [
-     *     [index1, index2], // these are the spans to highlight for this predicate
-     *     [index1, index2]
-     *   ]
-     * }
-     */
-    questionClusters, 
-    passageClusters,
-    answer,
-  } = props
-  const deepestIndex = activeDepths ? activeDepths.depths.indexOf(Math.max(...activeDepths.depths)) : null;
-  return (
-    <div style={{ display: 'flex', border: '1px solid grey' }}>
-      <div style={{ padding: '8px', flex: '0 0 auto' }}>
-        <NestedHighlight 
-          activeDepths={activeDepths}
-          activeIds={activeIds}
-          clusters={questionClusters}
-          isClickable
-          isClicking={isClicking}
-          labelPosition="bottom"
-          onMouseDown={onMouseDown}
-          onMouseOut={onMouseOut}
-          onMouseOver={onMouseOver}
-          onMouseUp={onMouseUp}
-          selectedId={selectedId}
-          tokens={questionTokens}
-        />
-        <div style={{ textAlign: 'center' }}>
-          ↓
-        </div>
-        <div style={{ textAlign: 'center' }}>
-          Question Parser
-        </div>
-        <div style={{ textAlign: 'center' }}>
-          ↓
-        </div>
-        <div style={{ textAlign: 'center', fontFamily: 'monospace' }}>
-          {programLisp}
-        </div>
-        <div style={{ textAlign: 'center' }}>
-          ↓
-        </div>
-        <div>
-          {Object.keys(questionClusters).map((key, i) => 
-            (
-              <div 
-                key={i}
-                style={{ display: 'flex', justifyContent: 'center' }}
-              >
-                <div 
-                  style={{ 
-                    display: 'unset',
-                    textAlign: 'center',
-                    width: `${(Object.keys(questionClusters).length - i) / Object.keys(questionClusters).length * 100}%`
-                  }}
-                  className={getHighlightConditionalClasses({
-                    labelPosition: null,
-                    label: null,
-                    color: getHighlightColor(i),
-                    isClickable: true,
-                    selectedId,
-                    isClicking,
-                    id: key,
-                    activeDepths,
-                    deepestIndex,
-                    activeIds,
-                    children: null,
-                  })}
-                  onMouseDown={onMouseDown ? () => onMouseDown(key, 0) : null}
-                  onMouseOver={onMouseOver ? () => onMouseOver(key) : null}
-                  onMouseOut={onMouseOut ? () => onMouseOut(key) : null}
-                  onMouseUp={onMouseUp ? () => onMouseUp(key) : null}
-                >
-                  {key}
-                </div>
-              </div>
-            )
-          )}
-        </div>
-        <div style={{ textAlign: 'center' }}>
-          ↓
-        </div>
-        <div style={{ textAlign: 'center' }}>
-          {answer}
-        </div>
-      </div>
-      <div style={{ padding: '8px' }}>
-        <NestedHighlight
-          activeDepths={activeDepths}
-          activeIds={activeIds}
-          clusters={passageClusters}
-          isClickable
-          isClicking={isClicking}
-          labelPosition="bottom"
-          onMouseDown={onMouseDown}
-          onMouseOut={onMouseOut}
-          onMouseOver={onMouseOver}
-          onMouseUp={onMouseUp}
-          selectedId={selectedId}
-          tokens={passageTokens}
-        />
-      </div>
-    </div>
-  );
-}
-
-const NmnDropExplanation = withHighlightClickHandling(NmnDrop);
 
 const MultiSpanHighlight = ({original, highlightSpans, highlightStyles}) => {
   if(original && highlightSpans && highlightStyles) {
@@ -344,6 +216,153 @@ const Attacks = ({attackData, attackModel, requestData}) => {
   )
 }
 
+const ColorizedSpan = styled.span`
+  border-radius: 4px;
+  background-color: ${props => props.backgroundColor};
+  padding: ${props => props.padding};
+`;
+
+const SpanWrapper = styled.span`
+  margin-right: 2px;
+  line-height: 38px;
+  &:last-child {
+    margin-right: 0;
+  }
+`;
+
+class NestedHeamap extends React.Component {
+  state = {
+    sliderValues: {},
+    modulesInUse: [],
+  }
+  nmnModulesToColors = {
+    0: '35, 137, 255',
+    1: '47, 245, 58',
+    2: '207, 3, 226',
+    3: '255, 108, 1',
+    4: '71, 218, 255',
+    5: '242, 43, 43',
+    6: '121, 72, 255',
+    7: '255, 252, 0',
+    8: '25, 93, 255',
+    9: '47, 255, 168',
+  }
+
+  componentDidMount() {
+    const modulesInUse = this.props.programExecution.reduce((acc, e) => {
+      Object.keys(e).forEach((key, i) => {
+        const values = e[key][this.props.executionKey] || [];
+        if (values.length) {
+          let moduleDisplayKey = key;
+          while (acc[moduleDisplayKey]) {
+            moduleDisplayKey = `${moduleDisplayKey}_`
+          }
+          const sortedValues = [...values].sort().reverse().map(v => values.indexOf(v));
+          acc[moduleDisplayKey] = { 
+            displayName: key,
+            color: this.nmnModulesToColors[Object.keys(acc).length],
+            values,
+            sortedValues,
+          }
+        }
+      })
+      return acc;
+    }, {})
+    const sliderValues = Object.keys(modulesInUse).reduce((acc, key) => {
+      acc[key] = 1;
+      return acc;
+    }, {})
+    this.setState({
+      modulesInUse,
+      sliderValues,
+    })
+  }
+
+  getBackgroundColor = (predicate, value, weight, color) => {
+    if (weight >= this.state.sliderValues[predicate]) {
+      return 'initial';
+    }
+
+    const percentWeighted = 100 / this.props.tokens.length
+    const opacity = ((this.props.tokens.length - weight) * percentWeighted) / 100;
+    return `rgba(${color}, ${opacity})`
+  }
+
+  handleSlider = (e, m) => {
+    const value = e.target.value;
+    this.setState((state) => {
+      const sliderValues = {...state.sliderValues}
+      sliderValues[m] = value
+      return { sliderValues }
+    })
+  }
+
+  render() {
+    const {
+      tokens,
+    } = this.props;
+    const {
+      modulesInUse,
+      sliderValues,
+    } = this.state;
+    const output = [];
+    for (let i = 0; i < tokens.length; i++) {
+      output.push(Object.keys(modulesInUse).reduce((o, m, index) => {
+        const thing = modulesInUse[m]
+        return {
+          span: (
+            <ColorizedSpan 
+              backgroundColor={this.getBackgroundColor(m, thing.values[i], thing.sortedValues[i], thing.color)}
+              padding={`${(index + 1) * 2}px`}
+            >
+              {o.span}
+            </ColorizedSpan>
+          ),
+          tooltipInfo: o.tooltipInfo.concat(...[{ key: thing.displayName, value: thing.values[i]}])
+        }
+      }, { span: tokens[i], tooltipInfo: [] }))
+    }
+    return (
+      <div>
+        <div style={{wordWrap: 'break-word'}}>
+          {output.map((o, i) => (
+            <Tooltip 
+              key={i}
+              title={(
+                <React.Fragment>
+                  {Object.keys(o.tooltipInfo).map(k => <div key={k}>{o.tooltipInfo[k].key}: {o.tooltipInfo[k].value}</div>)}
+                </React.Fragment>
+              )}
+            >
+              <SpanWrapper>
+                {o.span}
+              </SpanWrapper>
+            </Tooltip>
+          ))}
+        </div>
+        <br />
+        <br />
+        {Object.keys(modulesInUse).map(m => (
+          <div key={m}>
+            <label htmlFor={`slider-${m}`} style={{ color: `rgb(${modulesInUse[m].color})`}}>{modulesInUse[m].displayName}</label>
+            <input 
+              id={`slider-${m}`}
+              type="range" 
+              min={0} 
+              max={tokens.length} 
+              step="1" 
+              value={sliderValues[m]} 
+              className="slider" 
+              onChange={(e) => this.handleSlider(e, m)} 
+              style={{ padding: "0px", margin: "10px 0px" }}
+            />
+          </div>
+        ))}
+      </div>
+    )
+  }
+}
+
 const AnswerByType = ({ responseData, requestData, interpretData, interpretModel, attackData, attackModel}) => {
   if(requestData && responseData) {
     const { passage, question } = requestData;
@@ -352,60 +371,6 @@ const AnswerByType = ({ responseData, requestData, interpretData, interpretModel
 
     if (requestData.model === 'NMN (trained on DROP)') {
       const programExecution = responseData.program_execution;
-      const questionClusters = programExecution.reduce((acc, e) => {
-        Object.keys(e).forEach(key => {
-          if (e[key].question) {
-            let clusterKey = key
-            while (acc[clusterKey]) {
-              clusterKey = clusterKey + "_"
-            }
-            acc[clusterKey] = e[key].question.reduce((clusterAcc, q, i) => {
-              if (q > 0.000001) {
-                const lastCluster = clusterAcc[clusterAcc.length - 1]
-                if (!lastCluster) {
-                  clusterAcc.push([i, i])
-                } else {
-                  if (lastCluster[1] === i - 1) {
-                    lastCluster[1] = i
-                  }
-                  if (lastCluster[1] < i - 1) {
-                    clusterAcc.push([i, i])
-                  }
-                }
-              }
-              return clusterAcc;
-            }, [])
-          }
-        })
-        return acc;
-      }, {})
-      const passageClusters = programExecution.reduce((acc, e) => {
-        Object.keys(e).forEach(key => {
-          if (e[key].passage) {
-            let clusterKey = key
-            while (acc[clusterKey]) {
-              clusterKey = clusterKey + "_"
-            }
-            acc[clusterKey] = e[key].passage.reduce((clusterAcc, q, i) => {
-              if (q > 0.00001) {
-                const lastCluster = clusterAcc[clusterAcc.length - 1]
-                if (!lastCluster) {
-                  clusterAcc.push([i, i])
-                } else {
-                  if (lastCluster[1] === i - 1) {
-                    lastCluster[1] = i
-                  }
-                  if (lastCluster[1] < i - 1) {
-                    clusterAcc.push([i, i])
-                  }
-                }
-              }
-              return clusterAcc;
-            }, [])
-          }
-        })
-        return acc;
-      }, {})
       return (
         <section>
           <OutputField label="Answer">
@@ -413,13 +378,17 @@ const AnswerByType = ({ responseData, requestData, interpretData, interpretModel
           </OutputField>
           <OutputField label="Explanation">
             <section>
-              <NmnDropExplanation
-                programLisp={responseData.program_lisp}
-                questionTokens={questionTokens}
-                passageTokens={passageTokens}
-                questionClusters={questionClusters}
-                passageClusters={passageClusters}
-                answer={answer}
+              <NestedHeamap
+                programExecution={programExecution}
+                executionKey={"question"}
+                tokens={questionTokens}
+              />
+              <br />
+              <br />
+              <NestedHeamap
+                programExecution={programExecution}
+                executionKey={"passage"}
+                tokens={passageTokens}
               />
             </section>
           </OutputField>
@@ -598,7 +567,7 @@ const AnswerByType = ({ responseData, requestData, interpretData, interpretModel
 const Output = (props) => {
   return (
     <div className="model__content answer">
-      <AnswerByType {...props}/>
+      <AnswerByType {...props} />
     </div>
   )
 }
